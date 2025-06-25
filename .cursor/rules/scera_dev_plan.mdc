@@ -1,0 +1,479 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Scera MVP Development Guide for Cursor
+
+## Project Overview
+
+Build Scera - an AI-enhanced reading and knowledge management platform as a web application. The app allows users to upload books (PDF/ePub), read with AI-powered features, create highlights and notes, and manage their reading progress.
+
+## Technical Stack
+
+**Frontend**: Next.js 14 (App Router), TypeScript, Tailwind CSS, Shadcn/ui
+**Database**: Firebase Firestore
+**Authentication**: Firebase Authentication (Google OAuth)
+**File Storage**: Google Cloud Storage
+**AI Integration**: Google Gemini API (free tier)
+**Deployment**: Vercel
+
+## Project Structure
+
+Create the following project structure:
+```
+scera/
+├── src/
+│   ├── app/
+│   │   ├── (auth)/
+│   │   │   ├── login/
+│   │   │   └── signup/
+│   │   ├── library/
+│   │   ├── reader/
+│   │   │   └── [bookId]/
+│   │   ├── dashboard/
+│   │   └── api/
+│   │       ├── books/
+│   │       ├── highlights/
+│   │       ├── ai/
+│   │       └── upload/
+│   ├── components/
+│   │   ├── ui/ (shadcn components)
+│   │   ├── reader/
+│   │   ├── library/
+│   │   ├── auth/
+│   │   └── shared/
+│   ├── lib/
+│   │   ├── firebase.ts
+│   │   ├── gemini.ts
+│   │   ├── storage.ts
+│   │   └── utils.ts
+│   ├── hooks/
+│   ├── types/
+│   └── styles/
+├── public/
+└── firebase.json
+```
+
+## Initial Setup Commands
+
+Run these commands to set up the project:
+
+```bash
+npx create-next-app@latest scera --typescript --tailwind --eslint --app
+cd scera
+npm install firebase @google/generative-ai
+npm install @google-cloud/storage
+npx shadcn-ui@latest init
+npx shadcn-ui@latest add button input card dialog toast
+npm install react-dropzone
+npm install pdfjs-dist epubjs
+npm install zustand
+npm install lucide-react
+```
+
+## Firebase Configuration
+
+### 1. Firebase Project Setup
+Create `lib/firebase.ts`:
+```typescript
+import { initializeApp } from 'firebase/app';
+import { getAuth } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
+
+const firebaseConfig = {
+  // Add your Firebase config here
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
+};
+
+const app = initializeApp(firebaseConfig);
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+export default app;
+```
+
+### 2. Environment Variables
+Create `.env.local`:
+```
+NEXT_PUBLIC_FIREBASE_API_KEY=your_api_key
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
+GOOGLE_CLOUD_STORAGE_BUCKET=your_storage_bucket
+GEMINI_API_KEY=your_gemini_api_key
+```
+
+## Database Schema (Firestore Collections)
+
+### Users Collection
+```javascript
+users/{userId} {
+  email: string,
+  name: string,
+  readingGoal: number,
+  createdAt: timestamp,
+  updatedAt: timestamp
+}
+```
+
+### Books Collection
+```javascript
+books/{bookId} {
+  userId: string,
+  title: string,
+  author: string,
+  fileUrl: string,
+  fileType: string, // 'pdf' or 'epub'
+  totalPages: number,
+  currentPage: number,
+  completionPercentage: number,
+  tags: array,
+  createdAt: timestamp,
+  updatedAt: timestamp
+}
+```
+
+### Highlights Subcollection
+```javascript
+books/{bookId}/highlights/{highlightId} {
+  userId: string,
+  text: string,
+  pageNumber: number,
+  positionData: object,
+  color: string,
+  aiGenerated: boolean,
+  createdAt: timestamp
+}
+```
+
+### Notes Subcollection
+```javascript
+books/{bookId}/highlights/{highlightId}/notes/{noteId} {
+  userId: string,
+  content: string,
+  createdAt: timestamp,
+  updatedAt: timestamp
+}
+```
+
+## Core Components to Build
+
+### 1. Authentication System
+Create `components/auth/AuthProvider.tsx`:
+- Wrap app with Firebase Auth context
+- Handle Google OAuth sign-in/sign-out
+- Manage user state across the app
+- Redirect logic for protected routes
+
+### 2. File Upload Component
+Create `components/library/BookUpload.tsx`:
+- Use react-dropzone for drag-and-drop
+- Validate file types (PDF, ePub)
+- Upload to Google Cloud Storage
+- Extract metadata (title, author) from files
+- Save book record to Firestore
+
+### 3. PDF Reader Component
+Create `components/reader/PDFReader.tsx`:
+- Use PDF.js for rendering
+- Implement text selection
+- Add highlight creation functionality
+- Handle page navigation
+- Store reading progress
+
+### 4. ePub Reader Component
+Create `components/reader/EpubReader.tsx`:
+- Use epub.js for rendering
+- Implement similar highlighting features
+- Handle chapter navigation
+- Responsive text rendering
+
+### 5. AI Integration
+Create `lib/gemini.ts`:
+```typescript
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+
+export async function summarizeText(text: string) {
+  const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+  const prompt = `Summarize the key concepts in this text: ${text}`;
+  const result = await model.generateContent(prompt);
+  return result.response.text();
+}
+
+export async function answerQuestion(question: string, context: string) {
+  const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+  const prompt = `Based on this context: ${context}\n\nAnswer this question: ${question}`;
+  const result = await model.generateContent(prompt);
+  return result.response.text();
+}
+```
+
+## Key Features Implementation
+
+### 1. Reading Interface
+- Dual-view toggle (original vs summary)
+- Font size and family controls
+- Light/dark theme toggle
+- Reading progress tracking
+- Text selection and highlighting
+
+### 2. Highlight Management
+- Create highlights with different colors
+- Add personal notes to highlights
+- View all highlights in centralized view
+- Search and filter highlights
+- Export highlights
+
+### 3. AI Features
+- Text selection → AI summary
+- AI-linked highlighting (auto-highlight key sentences)
+- In-context AI assistant chat
+- Chapter breakdown with key themes
+- Context-aware vocabulary definitions
+
+### 4. Knowledge Organization
+- Book tagging system
+- Category-based library filtering
+- Vocabulary builder with definitions
+- Reading goals and progress tracking
+- Statistics dashboard
+
+### 5. Library Management
+- Upload books (PDF/ePub)
+- Display library with covers/metadata
+- Search and filter books
+- Tag management
+- Reading progress indicators
+
+## API Routes to Implement
+
+### Authentication
+- Handle Firebase Auth state changes
+- User profile management
+
+### Book Management
+- `POST /api/upload` - Handle file upload to GCS
+- `GET /api/books` - Fetch user's library
+- `PUT /api/books/[id]` - Update book metadata
+- `DELETE /api/books/[id]` - Delete book and cleanup
+
+### Reading Features
+- `POST /api/highlights` - Create/update highlights
+- `GET /api/books/[id]/highlights` - Fetch book highlights
+- `POST /api/ai/summarize` - Generate AI summaries
+- `POST /api/ai/chat` - AI assistant conversations
+
+### Progress Tracking
+- `PUT /api/books/[id]/progress` - Update reading progress
+- `GET /api/stats` - Fetch reading statistics
+
+## State Management with Zustand
+
+Create `lib/stores/`:
+
+```typescript
+// authStore.ts
+interface AuthState {
+  user: User | null;
+  loading: boolean;
+  signIn: () => Promise<void>;
+  signOut: () => Promise<void>;
+}
+
+// readerStore.ts
+interface ReaderState {
+  currentBook: Book | null;
+  currentPage: number;
+  highlights: Highlight[];
+  fontSize: number;
+  theme: 'light' | 'dark';
+  // Actions for reader state
+}
+
+// libraryStore.ts
+interface LibraryState {
+  books: Book[];
+  selectedTags: string[];
+  searchQuery: string;
+  // Library management actions
+}
+```
+
+## UI Component Requirements
+
+### Reader Interface
+- Clean, distraction-free reading view
+- Floating toolbar for text formatting
+- Sidebar for highlights and notes
+- Progress indicator
+- AI chat overlay
+
+### Library View
+- Grid/list toggle for books
+- Search and filter bar
+- Tag management interface
+- Upload area with drag-and-drop
+- Book cards with progress indicators
+
+### Dashboard
+- Reading statistics charts (use Recharts)
+- Goal progress visualization
+- Reading streaks calendar
+- Recent activity feed
+
+## Styling Guidelines
+
+Use Tailwind CSS with these conventions:
+- **Colors**: Use neutral palette with brand accent
+- **Typography**: Clear hierarchy with readable fonts
+- **Spacing**: Consistent 4px grid system
+- **Components**: Follow shadcn/ui patterns
+- **Responsive**: Mobile-first approach
+- **Dark Mode**: Support theme switching
+
+## Performance Optimizations
+
+### File Handling
+- Implement lazy loading for large PDFs
+- Chunk file uploads for better UX
+- Cache rendered pages client-side
+- Optimize images and thumbnails
+
+### Database Queries
+- Use Firestore compound indexes
+- Implement pagination for large datasets
+- Cache frequently accessed data
+- Batch operations where possible
+
+### AI API Usage
+- Cache AI responses to reduce API calls
+- Implement request queuing for rate limits
+- Show loading states for AI operations
+- Handle API failures gracefully
+
+## Security Considerations
+
+### Firestore Security Rules
+```javascript
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users can only access their own data
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Books belong to specific users
+    match /books/{bookId} {
+      allow read, write: if request.auth != null && 
+        request.auth.uid == resource.data.userId;
+      
+      // Highlights and notes inherit book permissions
+      match /{document=**} {
+        allow read, write: if request.auth != null && 
+          request.auth.uid == get(/databases/$(database)/documents/books/$(bookId)).data.userId;
+      }
+    }
+  }
+}
+```
+
+### File Upload Security
+- Validate file types and sizes
+- Scan uploaded files for malware
+- Use signed URLs for file access
+- Implement proper CORS policies
+
+## Error Handling
+
+Implement comprehensive error handling:
+- Network failures
+- File upload errors
+- AI API rate limiting
+- Authentication errors
+- Database connection issues
+- File parsing failures
+
+## Testing Strategy
+
+### Unit Tests
+- Component rendering tests
+- Utility function tests
+- State management tests
+
+### Integration Tests
+- Authentication flow
+- File upload process
+- AI feature integration
+- Database operations
+
+### E2E Tests
+- Complete user workflows
+- Cross-browser compatibility
+- Mobile responsiveness
+
+## Deployment Setup
+
+### Vercel Configuration
+Create `vercel.json`:
+```json
+{
+  "functions": {
+    "app/api/**/*.ts": {
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    }
+  ]
+}
+```
+
+### Build Optimization
+- Enable Next.js optimizations
+- Configure bundle analyzer
+- Set up proper caching headers
+- Optimize images and fonts
+
+## Development Best Practices
+
+1. **Code Organization**: Keep components small and focused
+2. **Type Safety**: Use TypeScript strictly, define proper interfaces
+3. **Error Boundaries**: Implement React error boundaries
+4. **Loading States**: Show loading indicators for async operations
+5. **Accessibility**: Follow WCAG guidelines
+6. **Performance**: Monitor bundle size and runtime performance
+7. **Security**: Never expose API keys client-side
+8. **Documentation**: Comment complex logic and API integrations
+
+## Key Libraries and Versions
+
+```json
+{
+  "next": "^14.0.0",
+  "react": "^18.0.0",
+  "typescript": "^5.0.0",
+  "firebase": "^10.0.0",
+  "@google/generative-ai": "^0.2.0",
+  "@google-cloud/storage": "^7.0.0",
+  "tailwindcss": "^3.0.0",
+  "pdfjs-dist": "^3.11.0",
+  "epubjs": "^0.3.93",
+  "zustand": "^4.4.0",
+  "react-dropzone": "^14.0.0"
+}
+```
+
+This guide provides the complete foundation for building Scera MVP with Cursor AI assistance. Focus on implementing features incrementally, testing thoroughly, and maintaining clean, type-safe code throughout development.
