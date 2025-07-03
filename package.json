@@ -17,5 +17,8 @@
   "bugs": {
     "url": "https://github.com/jeremiahnnadi/scera/issues"
   },
-  "homepage": "https://github.com/jeremiahnnadi/scera#readme"
+  "homepage": "https://github.com/jeremiahnnadi/scera#readme",
+  "dependencies": {
+    "firebase": "^11.10.0"
+  }
 }
